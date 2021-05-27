@@ -89,6 +89,9 @@ class NBodySystemProcess(config: Config) extends Process[IO] {
           body.advance(DT, bodies(j))
         }
       }
+      body.x += DT * body.vx
+      body.y += DT * body.vy
+      body.z += DT * body.vz
     }
   }
 

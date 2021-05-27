@@ -24,13 +24,9 @@ class Body {
 
     val distance = Math.sqrt(dx * dx + dy * dy + dz * dz) // https://mathworld.wolfram.com/L2-Norm.html
     val mag = dt / (distance * distance * distance)
-    vx -= dx * other.mass * mag
-    vy -= dy * other.mass * mag
-    vz -= dz * other.mass * mag
-
-    x += dt * vx
-    y += dt * vy
-    z += dt * vz
+    vx += dx * other.mass * mag
+    vy += dy * other.mass * mag
+    vz += dz * other.mass * mag
   }
 }
 
