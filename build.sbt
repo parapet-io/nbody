@@ -9,6 +9,7 @@ val dependencies = Seq(
   "io.parapet" %% "cluster-node" % "0.0.1-RC5",
   "io.parapet" %% "interop-cats" % "0.0.1-RC5",
   "com.github.scopt" %% "scopt" % "4.0.1",
+  "org.slf4j" % "slf4j-log4j12" % "1.7.25",
   "org.slf4j" % "slf4j-log4j12" % "1.7.25"
 )
 

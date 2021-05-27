@@ -1,12 +1,13 @@
 package io.parapet.nbody.node
 
 import cats.effect.IO
+import com.typesafe.scalalogging.Logger
 import io.parapet.cluster.node.Req
 import io.parapet.core.Dsl.DslF
 import io.parapet.core.Event.Start
 import io.parapet.core.{Process, ProcessRef}
 import io.parapet.nbody.api.Nbody
-import io.parapet.nbody.api.Nbody.{Cmd, CmdType}
+import io.parapet.nbody.api.Nbody.{Cmd, CmdType, Update}
 import io.parapet.nbody.core.Body
 
 import java.nio.charset.StandardCharsets
@@ -22,19 +23,43 @@ class NBodySystemProcess(config: Config) extends Process[IO] {
   }
 
   val DT = 0.01
-
   val coordinatorId = "coordinator"
-
-
+  private val logger = Logger[NBodySystemProcess]
   override val ref: ProcessRef = Constants.NBodySystemRef
 
   override def handle: Receive = {
-    case Start => loadBodies
-    case Req(_, data) =>
+    case Start =>
+      (loadBodies ++ advance ++ sendUpdate)
+        .handleError(err => eval(logger.error("start has failed", err)))
+    case Req(sender, data) =>
+      logger.debug(s"received req from $sender")
       val cmd = Cmd.parseFrom(data)
       cmd.getCmdType match {
-        case CmdType.NEXT_ROUND =>
-          advance ++ sendUpdate
+        case CmdType.NEXT_ROUND => (advance ++ sendUpdate)
+          .handleError(err => eval(logger.error("failed to process round", err)))
+        case CmdType.UPDATE =>
+          eval {
+            val update = Update.parseFrom(cmd.getData)
+            logger.debug(s"received update for ${update.getBodyCount} bodies")
+            var j = update.getFrom
+            for (i <- 0 until update.getBodyCount) {
+              val body = update.getBody(i)
+              bodies(j).x = body.getX
+              bodies(j).y = body.getY
+              bodies(j).z = body.getZ
+
+              bodies(j).vx = body.getVx
+              bodies(j).vy = body.getVy
+              bodies(j).vz = body.getVz
+
+              bodies(j).mass = body.getMass
+
+              // logger.debug(s"body $i has been updated")
+              // printBody(j, bodies(j))
+
+              j = j + 1
+            }
+          }
       }
   }
 
@@ -53,6 +78,7 @@ class NBodySystemProcess(config: Config) extends Process[IO] {
 
       body.mass = parts(6).toDouble * Body.SOLAR_MASS
     }
+    logger.info(s"${bodies.length} bodies loaded")
   }
 
   def advance: DslF[IO, Unit] = eval {
@@ -66,30 +92,31 @@ class NBodySystemProcess(config: Config) extends Process[IO] {
     }
   }
 
-  def sendUpdate(): DslF[IO, Unit] = eval {
-    val size = config.to - config.from
-    val arr = new Array[Nbody.Body](size)
+  def sendUpdate: DslF[IO, Unit] = eval {
+    val updateBuilder = Nbody.Update.newBuilder()
 
-    var i = 0
-    for (j <- config.to until config.from) {
+    for (j <- config.from until config.to) {
       val body = bodies(j)
-      arr(i) = Nbody.Body.newBuilder()
+      updateBuilder.addBody(Nbody.Body.newBuilder()
         .setX(body.x)
         .setY(body.y)
         .setZ(body.z)
         .setVx(body.vx)
         .setVy(body.vy)
         .setVz(body.vz)
-        .setMass(body.mass).build()
-      i = i + 1
+        .setMass(body.mass).build())
     }
-    val update = Nbody.Update.newBuilder()
-      .addAllBody(arr.toList.asJava)
+    val update = updateBuilder
       .setFrom(config.from)
       .setTo(config.to).build()
-    update
-  }.flatMap(update => Req(coordinatorId, update.toByteArray) ~> Constants.NodeRef)
+    require(update.getBodyCount == (config.to - config.from))
+    Cmd.newBuilder().setCmdType(CmdType.UPDATE).setData(update.toByteString).build()
+  }.flatMap(cmd => Req(coordinatorId, cmd.toByteArray) ~> Constants.NodeRef)
 
+
+  def printBody(i: Int, body: Body): Unit = {
+    logger.debug(s"i=$i, x=${body.x}, y=${body.y}, z=${body.z}, vx=${body.vx}, vy=${body.vy}, vz=${body.vz}, mass=${body.mass}")
+  }
 }
 
 object NBodySystemProcess {}
