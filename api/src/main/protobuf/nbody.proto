@@ -1,0 +1,31 @@
+syntax = "proto2";
+
+package api;
+
+option java_package = "io.parapet.nbody.api";
+
+enum CmdType {
+    UPDATE = 0;
+    NEXT_ROUND = 1;
+}
+
+message Cmd {
+    required CmdType cmdType = 1;
+    optional bytes data = 2;
+}
+
+message Body {
+    required double x = 1;
+    required double y = 2;
+    required double z = 3;
+    required double vx = 4;
+    required double vy = 5;
+    required double vz = 6;
+    required double mass = 7;
+}
+
+message Update {
+    repeated Body body = 1;
+    required int32 from = 2;
+    required int32 to = 3;
+}
