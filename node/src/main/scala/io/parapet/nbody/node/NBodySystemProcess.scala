@@ -96,7 +96,7 @@ class NBodySystemProcess(config: Config) extends Process[IO] {
           val r6 = r2 * r2 * r2
           val rI = 1.0f / Math.sqrt(r6)
 
-          val s = body.mass * rI
+          val s = bodies(i).mass * rI
 
           a.x += r.x * s;
           a.y += r.y * s;
