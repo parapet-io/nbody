@@ -4,10 +4,14 @@ import cats.effect.IO
 import com.typesafe.scalalogging.Logger
 import io.parapet.cluster.node.Req
 import io.parapet.core.Dsl.DslF
+import io.parapet.core.Event.{Start, Stop}
 import io.parapet.core.{Process, ProcessRef}
 import io.parapet.nbody.api.Nbody
 import io.parapet.nbody.api.Nbody.{Cmd, CmdType, Update}
 import io.parapet.nbody.core.Body
+
+import java.io.{BufferedWriter, FileOutputStream, OutputStreamWriter}
+import java.nio.file.Paths
 
 class CoordinatorProcess(config: Config) extends Process[IO] {
 
@@ -27,7 +31,15 @@ class CoordinatorProcess(config: Config) extends Process[IO] {
 
   private var roundCount = 0
 
+  private var outputFile: BufferedWriter = _
+
   override def handle: Receive = {
+    case Start => eval {
+      outputFile = createWriter()
+    }.handleError(e => eval(logger.error("failed to create output file writer", e)))
+    case Stop => eval {
+      outputFile.close()
+    }
     case Req(_, data) =>
       val cmd = Cmd.parseFrom(data)
       cmd.getCmdType match {
@@ -68,7 +80,8 @@ class CoordinatorProcess(config: Config) extends Process[IO] {
                   .setMass(body.mass).build()))
               val update = Cmd.newBuilder().setCmdType(CmdType.UPDATE)
                 .setData(updateBuilder.setFrom(0).setTo(bodies.length).build().toByteString).build()
-              logBodies ++
+              //logBodies ++
+              logToTextFile ++
                 nodeIds.foldLeft(unit)((acc, nodeId) => acc ++ Req(nodeId, update.toByteArray) ~> Constants.NodeRef) ++
                 nodeIds.foldLeft(unit)((acc, nodeId) =>
                   acc ++ Req(nodeId,
@@ -93,6 +106,21 @@ class CoordinatorProcess(config: Config) extends Process[IO] {
         printBody(i, bodies(i))
       }
     }
+  }
+
+  def logToTextFile: DslF[IO, Unit] = eval {
+    for (i <- bodies.indices) {
+      val body = bodies(i)
+      outputFile.write(s"$i ${body.x} ${body.y} ${body.z} ${body.vx} ${body.vy} ${body.vz} ${body.mass}\n")
+    }
+  }
+
+  def createWriter(): BufferedWriter = {
+    val path = Paths.get("./output")
+    val file = path.toFile
+    //if (!Files.exists(path)) Files.createFile(path)
+    new BufferedWriter(new OutputStreamWriter(
+      new FileOutputStream(file, false), "UTF-8"))
   }
 
   def printBody(i: Int, body: Body): Unit = {

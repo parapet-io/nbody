@@ -8,7 +8,7 @@ import io.parapet.core.Event.Start
 import io.parapet.core.{Process, ProcessRef}
 import io.parapet.nbody.api.Nbody
 import io.parapet.nbody.api.Nbody.{Cmd, CmdType, Update}
-import io.parapet.nbody.core.Body
+import io.parapet.nbody.core.{Body, Vec}
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
@@ -84,14 +84,26 @@ class NBodySystemProcess(config: Config) extends Process[IO] {
   def advance: DslF[IO, Unit] = eval {
     for (i <- config.from until config.to) {
       val body = bodies(i)
+      val a = new Vec
       for (j <- 0 until config.nbodySize) {
         if (i != j) {
-          body.advance(DT, bodies(j))
+          val r = new Vec
+          r.x = bodies(j).x - body.x;
+          r.y = bodies(j).y - body.y;
+          r.z = bodies(j).z - body.z;
+
+          val r2 = r.x * r.x + r.y * r.y + r.z * r.z + 1e-6
+          val r6 = r2 * r2 * r2
+          val rI = 1.0f / Math.sqrt(r6)
+
+          val s = body.mass * rI
+
+          a.x += r.x * s;
+          a.y += r.y * s;
+          a.z += r.z * s;
         }
       }
-      body.x += DT * body.vx
-      body.y += DT * body.vy
-      body.z += DT * body.vz
+      body.update(DT, a)
     }
   }
 
