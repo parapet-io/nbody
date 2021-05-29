@@ -8,7 +8,7 @@ import io.parapet.core.Event.Start
 import io.parapet.core.{Process, ProcessRef}
 import io.parapet.nbody.api.Nbody
 import io.parapet.nbody.api.Nbody.{Cmd, CmdType, Update}
-import io.parapet.nbody.core.{Body, Vec}
+import io.parapet.nbody.core.Body
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
@@ -29,8 +29,9 @@ class NBodySystemProcess(config: Config) extends Process[IO] {
 
   override def handle: Receive = {
     case Start =>
-      (loadBodies ++ advance ++ sendUpdate)
-        .handleError(err => eval(logger.error("start has failed", err)))
+      eval(logger.info(config.toString)) ++
+        (loadBodies ++ advance ++ sendUpdate)
+          .handleError(err => eval(logger.error("start has failed", err)))
     case Req(sender, data) =>
       logger.debug(s"received req from $sender")
       val cmd = Cmd.parseFrom(data)
@@ -41,23 +42,20 @@ class NBodySystemProcess(config: Config) extends Process[IO] {
           eval {
             val update = Update.parseFrom(cmd.getData)
             logger.debug(s"received update for ${update.getBodyCount} bodies")
-            var j = update.getFrom
             for (i <- 0 until update.getBodyCount) {
               val body = update.getBody(i)
-              bodies(j).x = body.getX
-              bodies(j).y = body.getY
-              bodies(j).z = body.getZ
+              bodies(i).x = body.getX
+              bodies(i).y = body.getY
+              bodies(i).z = body.getZ
 
-              bodies(j).vx = body.getVx
-              bodies(j).vy = body.getVy
-              bodies(j).vz = body.getVz
+              bodies(i).vx = body.getVx
+              bodies(i).vy = body.getVy
+              bodies(i).vz = body.getVz
 
-              bodies(j).mass = body.getMass
+              bodies(i).mass = body.getMass
 
               // logger.debug(s"body $i has been updated")
               // printBody(j, bodies(j))
-
-              j = j + 1
             }
           }
       }
@@ -75,36 +73,49 @@ class NBodySystemProcess(config: Config) extends Process[IO] {
       body.vx = parts(3).toDouble * Body.DAYS_PER_YEAR
       body.vy = parts(4).toDouble * Body.DAYS_PER_YEAR
       body.vz = parts(5).toDouble * Body.DAYS_PER_YEAR
+      body.mass = parts(6).toDouble
 
-      body.mass = parts(6).toDouble * Body.SOLAR_MASS
+      if (i > 0) {
+        body.mass = body.mass * Body.SOLAR_MASS
+      }
+
     }
+    var px = 0.0d
+    var py = 0.0d
+    var pz = 0.0d
+    for (i <- lines.indices) {
+      px += bodies(i).vx * bodies(i).mass
+      py += bodies(i).vy * bodies(i).mass
+      pz += bodies(i).vz * bodies(i).mass
+    }
+    bodies(0).offsetMomentum(px, py, pz);
+
     logger.info(s"${bodies.length} bodies loaded")
   }
 
   def advance: DslF[IO, Unit] = eval {
     for (i <- config.from until config.to) {
-      val body = bodies(i)
-      val a = new Vec
       for (j <- 0 until config.nbodySize) {
         if (i != j) {
-          val r = new Vec
-          r.x = bodies(j).x - body.x;
-          r.y = bodies(j).y - body.y;
-          r.z = bodies(j).z - body.z;
+          val dx = bodies(i).x - bodies(j).x
+          val dy = bodies(i).y - bodies(j).y
+          val dz = bodies(i).z - bodies(j).z
 
-          val r2 = r.x * r.x + r.y * r.y + r.z * r.z + 1e-6
-          val r6 = r2 * r2 * r2
-          val rI = 1.0f / Math.sqrt(r6)
-
-          val s = bodies(i).mass * rI
-
-          a.x += r.x * s;
-          a.y += r.y * s;
-          a.z += r.z * s;
+          val distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          val mag = DT / (distance * distance * distance);
+          bodies(i).vx -= dx * bodies(j).mass * mag
+          bodies(i).vy -= dy * bodies(j).mass * mag
+          bodies(i).vz -= dz * bodies(j).mass * mag
         }
       }
-      body.update(DT, a)
     }
+
+    for (i <- config.from until config.to) {
+      bodies(i).x += DT * bodies(i).vx
+      bodies(i).y += DT * bodies(i).vy
+      bodies(i).z += DT * bodies(i).vz
+    }
+
   }
 
   def sendUpdate: DslF[IO, Unit] = eval {
